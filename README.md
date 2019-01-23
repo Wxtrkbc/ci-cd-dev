@@ -1,2 +1,2 @@
-# Using Docker Code Examples
-## "Continuous Integration and Testing with Docker"
+# A CI and CD project for python
+
