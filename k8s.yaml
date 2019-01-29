@@ -1,33 +1,161 @@
+# namespace
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
     name: dev
 
+
+#####################
+# Redis configMap, StatefulSet, srv,
+#####################
+
+# Redis service
 ---
-apiVersion: extensions/v1beta1
-kind: Deployment
+apiVersion: v1
+kind: Service
 metadata:
-  name: ci-cd-dev
+  name: redis
+  namespace: dev
+spec:
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: redis
+  clusterIP: None
+  selector:
+    app: ci-cd-redis
+
+
+# Redis configMap
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: dev
+data:
+  redis-config: |
+    maxmemory 2mb
+    maxmemory-policy allkeys-lru
+    save 900 1
+    appendonly yes
+
+
+# redis pvc
+#---
+#apiVersion: v1
+#kind: Service
+#metadata:
+#  name: redis
+#  namespace: dev
+#  annotations:
+#    volume.beta.kubernetes.io/storage-class: "course-nfs-storage"
+#  labels:
+#    app: redis
+#spec:
+#  accessModes:
+#  - ReadWriteMany
+#  resources:
+#    requests:
+#      storage: 256Mi
+
+
+# redis StatefulSet
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ci-cd-redis
   namespace: dev
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      app: ci-cd-redis
+  serviceName: redis
   template:
     metadata:
+      name: ci-cd-redis
       labels:
-        app: ci-cd-dev
+        app: ci-cd-redis
+    spec:
+      containers:
+        - image: redis:latest
+          name: ci-cd-redis
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MASTER
+              value: "true"
+          ports:
+            - containerPort: 6379
+              name: redis
+              protocol: TCP
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: config
+              mountPath: /redis-master
+            - name: redis
+              mountPath: /data
+
+      volumes:
+        - name: config
+          configMap:
+            name: redis-config
+            items:
+              - key: redis-config
+                path: redis.conf
+
+  volumeClaimTemplates:
+    - metadata:
+        name: redis
+        annotations:
+          volume.beta.kubernetes.io/storage-class: course-nfs-storage
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 256Mi
+
+
+
+#####################
+# App deployment and srv
+#####################
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ci-cd-app
+  namespace: dev
+spec:
+  selector:
+    matchLabels:
+      app: ci-cd-app
+  replicas: 1
+  template:
+    metadata:
+      name: ci-cd-app
+      labels:
+        app: ci-cd-app
     spec:
       containers:
         - image: ahprosim/ci-cd-dev:<BUILD_TAG>
           imagePullPolicy: IfNotPresent
-          name: ci-cd-dev
+          name: ci-cd-app
           resources:
             limits:
-              cpu: 200m
-              memory: 128Mi
+              cpu: 100m
+              memory: 64Mi
             requests:
-              cpu: 200m
-              memory: 128Mi
+              cpu: 100m
+              memory: 64Mi
           ports:
             - containerPort: 5000
               name: web
@@ -50,19 +178,19 @@ spec:
 
           env:
            - name: ENV
-             value: <ENV_MODE>
+             value: DEV
 
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: ci-cd-dev-service
+  name: app-srv
   namespace: dev
   labels:
-    app: ci-cd-dev
+    app: app-srv
 spec:
   selector:
-    app: ci-cd-dev
+    app: ci-cd-app
   type: NodePort
   ports:
     - name: web
